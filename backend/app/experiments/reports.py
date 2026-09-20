@@ -6,7 +6,7 @@ from ..config import DISCLAIMER
 from ..database import session_scope
 from ..storage.entities import Experiment, ModelRecord, ExplanationRecord
 from ..storage.repository import require
-from ..storage.files import atomic_bytes, safe_path
+from ..storage.files import save_bytes
 from ..utils.serialization import utcnow
 from .comparison import comparison
 
@@ -46,5 +46,5 @@ def html_report(identity: str) -> str:
     sections.append("<h2>Scientific conclusion from measured results</h2>" + pre({"conclusion": data["comparison"]["conclusion"], "pairs": data["comparison"]["pairs"]}))
     sections.append("<h2>Clinical validation boundary</h2><p>" + escaped(data["scientific_boundary"]) + "</p><footer>Report generated " + escaped(data["generated_at"]) + ". No raw records are exported.</footer>")
     document = '<!doctype html><html lang="en"><meta charset="utf-8"><title>EntangleX Q-Health research report</title><style>body{font:16px/1.6 system-ui,sans-serif;max-width:1100px;margin:40px auto;padding:20px;color:#183442}h1,h2{color:#126675}aside{border-left:5px solid #378593;padding:18px;background:#eff7f7}pre{font:12px/1.5 monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f7fa;padding:18px}h2{margin-top:36px}@media print{body{margin:0;max-width:none}pre{font-size:10px}h2,h3{break-after:avoid}}</style><body>' + "".join(sections) + "</body></html>"
-    atomic_bytes(safe_path("experiments", identity, ".html"), document.encode("utf-8"))
+    save_bytes("experiments", identity, ".html", document.encode("utf-8"))
     return document

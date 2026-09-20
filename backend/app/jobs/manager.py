@@ -11,7 +11,7 @@ from ..database import session_scope
 from ..models.training import train_model
 from ..quantum.backends import require_quantum
 from ..storage.entities import Experiment, Job, ModelRecord
-from ..storage.files import atomic_bytes, safe_path, save_model
+from ..storage.files import save_bytes, save_model
 from ..storage.repository import require
 from ..utils.errors import AppError, CancelledError
 from ..utils.serialization import clean_json, fingerprint, software_versions, utcnow
@@ -26,6 +26,8 @@ class TrainingManager:
         self.lock = Lock()
 
     def start(self):
+        if get_settings().serverless:
+            return
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="qhealth-training")
         with session_scope() as session:
             for job in session.scalars(select(Job).where(Job.status.in_(ACTIVE))):
@@ -35,6 +37,8 @@ class TrainingManager:
                 require(session, Experiment, job.experiment_id).status = "interrupted"
 
     def stop(self):
+        if get_settings().serverless:
+            return
         if self.executor is None:
             return
         with session_scope() as session:
@@ -45,8 +49,13 @@ class TrainingManager:
         self.executor = None
 
     def enqueue(self, config: TrainingConfig, parent_id: str | None = None):
-        if self.executor is None:
+        if self.executor is None and not get_settings().serverless:
             raise AppError("worker_unavailable", "Training worker is not started.", 503)
+        if get_settings().serverless:
+            if config.max_samples and config.max_samples > get_settings().serverless_max_samples:
+                raise AppError("serverless_budget", f"Vercel demo jobs are limited to {get_settings().serverless_max_samples} samples.", 422)
+            if config.cv_folds > get_settings().serverless_max_cv_folds:
+                raise AppError("serverless_budget", f"Vercel demo jobs are limited to {get_settings().serverless_max_cv_folds} CV folds.", 422)
         data = prepare_data(config)  # Preflight validation, not model fitting.
         if {"vqc", "qsvc"}.intersection(config.models):
             require_quantum()
@@ -69,10 +78,21 @@ class TrainingManager:
                 job = Job(id=str(uuid4()), experiment_id=experiment.id)
                 session.add(job)
             try:
-                self.executor.submit(self._run, job.id, experiment.id, config)
+                if get_settings().serverless:
+                    # Persist first, then execute in the request. The job row is
+                    # the durable contract; no in-process worker is required.
+                    self._run(job.id, experiment.id, config)
+                else:
+                    self.executor.submit(self._run, job.id, experiment.id, config)
             except RuntimeError as exc:
                 self._finish(job.id, experiment.id, "failed", "Worker could not accept the job.")
                 raise AppError("worker_unavailable", "Worker could not accept the job.", 503) from exc
+        if get_settings().serverless:
+            # Return the durable state after synchronous bounded execution,
+            # rather than the initial queued snapshot.
+            with session_scope() as session:
+                job = require(session, Job, job.id)
+                experiment = require(session, Experiment, experiment.id)
         return job, experiment
 
     def cancel(self, identity: str):
@@ -147,8 +167,8 @@ class TrainingManager:
                 experiment = require(session, Experiment, experiment_id)
                 snapshot = {"experiment_id": experiment.id, "config": experiment.config, "summary": experiment.summary, "status": experiment.status}
             try:
-                atomic_bytes(safe_path("experiments", experiment_id, ".json"), json.dumps(clean_json(snapshot), indent=2).encode())
-            except OSError as exc:
+                save_bytes("experiments", experiment_id, ".json", json.dumps(clean_json(snapshot), indent=2).encode())
+            except Exception as exc:
                 logger.warning("snapshot_failure experiment_id=%s exception_type=%s", experiment_id, type(exc).__name__)
                 with session_scope() as session:
                     record = require(session, Experiment, experiment_id)
