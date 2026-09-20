@@ -9,7 +9,7 @@ from ..api.schemas import DatasetUploadMetadata
 from ..config import get_settings
 from ..database import session_scope
 from ..storage.entities import Dataset, Experiment
-from ..storage.files import atomic_bytes, safe_path, sanitize_filename, verify
+from ..storage.files import delete_object, read_bytes, save_bytes, sanitize_filename, verify_object
 from ..storage.repository import require
 from ..utils.errors import AppError
 from ..utils.serialization import utcnow
@@ -65,23 +65,21 @@ def register_csv(content: bytes, filename: str, metadata: DatasetUploadMetadata,
         "license": license_info, "is_demo": license_info is not None, "deidentification_asserted_by_uploader": True,
         "preprocessing_configuration": "Stored per experiment; source dataset is immutable.",
     }
-    path = safe_path("data/datasets", identity, ".csv")
-    atomic_bytes(path, content)
+    save_bytes("data/datasets", identity, ".csv", content)
     try:
         with session_scope() as session:
             record = Dataset(id=identity, name=metadata.name, filename=sanitize_filename(filename), sha256=sha, provenance=provenance, quality=quality, created_at=timestamp)
             session.add(record)
         return record
     except Exception:
-        path.unlink(missing_ok=True)
+        delete_object("data/datasets", identity, ".csv")
         raise
 
 def load_frame(identity: str) -> tuple[Dataset, pd.DataFrame]:
     with session_scope() as session:
         record = require(session, Dataset, identity)
-    path = safe_path("data/datasets", identity, ".csv")
-    verify(path, record.sha256)
-    return record, parse_csv(path.read_bytes(), record.provenance["target"])
+    verify_object("data/datasets", identity, ".csv", record.sha256)
+    return record, parse_csv(read_bytes("data/datasets", identity, ".csv"), record.provenance["target"])
 
 def register_demo() -> Dataset:
     from sklearn.datasets import load_breast_cancer
@@ -111,4 +109,4 @@ def delete_dataset(identity: str) -> None:
         if used:
             raise AppError("dataset_in_use", "This dataset is referenced by an experiment and is retained for reproducibility.", 409)
         session.delete(dataset)
-    safe_path("data/datasets", identity, ".csv").unlink(missing_ok=True)
+    delete_object("data/datasets", identity, ".csv")

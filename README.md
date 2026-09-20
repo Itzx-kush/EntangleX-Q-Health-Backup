@@ -103,6 +103,12 @@ npm run dev
 
 Open `http://127.0.0.1:5173`. Vite proxies `/api` to `http://127.0.0.1:8000`; no frontend environment file is required. The connection indicator reports HTTP reachability, not scientific validity or quantum execution. `npm run build` performs a TypeScript check and production build when you execute it.
 
+## Vercel deployment
+
+The repository now includes a native Vercel topology: `api/index.py` exposes the existing FastAPI app, `vercel.json` routes `/api/*` before the React SPA fallback, and `frontend/dist` is served as the static build. Production persistence uses a hosted PostgreSQL-compatible database plus S3-compatible object storage; Vercel local files are not treated as durable. The bounded serverless job path persists job state and executes controlled demo training in the request rather than relying on an immortal worker.
+
+Follow the exact Windows PowerShell deployment steps in [Vercel deployment](docs/vercel-deployment.md). Local development remains SQLite + local filesystem by default.
+
 ## 8. Docker startup
 
 From the project root after copying `.env.example` to `.env`:

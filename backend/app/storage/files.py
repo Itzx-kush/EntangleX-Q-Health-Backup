@@ -23,6 +23,72 @@ def safe_path(area: str, identity: str, suffix: str) -> Path:
         raise AppError("invalid_path", "Unsafe storage path.")
     return path
 
+def storage_key(area: str, identity: str, suffix: str) -> str:
+    """Return a validated object key without exposing user-controlled paths."""
+    safe_path(area, identity, suffix)
+    prefix = get_settings().object_storage_prefix.strip("/")
+    return f"{prefix}/{area}/{UUID(str(identity))}{suffix}"
+
+def _s3():
+    settings = get_settings()
+    if not all([settings.object_storage_bucket, settings.object_storage_access_key, settings.object_storage_secret_key]):
+        raise AppError("storage_not_configured", "Object storage is not configured for this deployment.", 503)
+    try:
+        import boto3
+        return boto3.client(
+            "s3",
+            endpoint_url=settings.object_storage_endpoint,
+            aws_access_key_id=settings.object_storage_access_key,
+            aws_secret_access_key=settings.object_storage_secret_key,
+            region_name=settings.object_storage_region,
+        )
+    except Exception as exc:
+        raise AppError("storage_unavailable", "Object storage could not be initialized.", 503) from exc
+
+def save_bytes(area: str, identity: str, suffix: str, value: bytes) -> str:
+    digest_value = hashlib.sha256(value).hexdigest()
+    settings = get_settings()
+    if settings.storage_backend == "s3":
+        try:
+            content_type = {".csv": "text/csv", ".json": "application/json", ".html": "text/html", ".dill": "application/octet-stream"}.get(suffix, "application/octet-stream")
+            _s3().put_object(Bucket=settings.object_storage_bucket, Key=storage_key(area, identity, suffix), Body=value, ContentType=content_type)
+        except AppError:
+            raise
+        except Exception as exc:
+            raise AppError("storage_unavailable", "Object storage could not save the artifact.", 503) from exc
+        return digest_value
+    return atomic_bytes(safe_path(area, identity, suffix), value)
+
+def read_bytes(area: str, identity: str, suffix: str) -> bytes:
+    settings = get_settings()
+    if settings.storage_backend == "s3":
+        try:
+            return _s3().get_object(Bucket=settings.object_storage_bucket, Key=storage_key(area, identity, suffix))["Body"].read()
+        except AppError:
+            raise
+        except Exception as exc:
+            raise AppError("artifact_missing", "The stored artifact is unavailable.", 404) from exc
+    path = safe_path(area, identity, suffix)
+    if not path.is_file():
+        raise AppError("artifact_missing", "The stored artifact is unavailable.", 404)
+    return path.read_bytes()
+
+def delete_object(area: str, identity: str, suffix: str) -> None:
+    settings = get_settings()
+    if settings.storage_backend == "s3":
+        try:
+            _s3().delete_object(Bucket=settings.object_storage_bucket, Key=storage_key(area, identity, suffix))
+        except AppError:
+            raise
+        except Exception as exc:
+            raise AppError("storage_unavailable", "Object storage could not delete the artifact.", 503) from exc
+        return
+    safe_path(area, identity, suffix).unlink(missing_ok=True)
+
+def verify_object(area: str, identity: str, suffix: str, expected: str) -> None:
+    if hashlib.sha256(read_bytes(area, identity, suffix)).hexdigest() != expected:
+        raise AppError("integrity_error", "Stored artifact is missing or its integrity hash has changed.", 409)
+
 def digest(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as stream:
@@ -53,11 +119,10 @@ def verify(path: Path, expected: str) -> None:
 
 def save_model(identity: str, bundle: dict) -> str:
     import dill
-    return atomic_bytes(safe_path("models", identity, ".dill"), dill.dumps(bundle, protocol=5))
+    return save_bytes("models", identity, ".dill", dill.dumps(bundle, protocol=5))
 
 def load_model(identity: str, expected: str) -> dict:
     # Only application-created, hash-checked local artifacts. NEVER accept uploaded models.
     import dill
-    path = safe_path("models", identity, ".dill")
-    verify(path, expected)
-    return dill.loads(path.read_bytes())
+    verify_object("models", identity, ".dill", expected)
+    return dill.loads(read_bytes("models", identity, ".dill"))
