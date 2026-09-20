@@ -35,7 +35,9 @@ Vercel project instead.
 2. Select the GitHub repository `Itzx-kush/EntangleX-Q-Health-Backup`.
 3. Set **Root Directory** to `./` (the repository root).
 4. The committed `vercel.json` supplies the install command, build command,
-   output directory, Python function runtime, and routing. Do not configure a
+  output directory, Python function settings, and routing. Vercel's default
+  Python runtime is used; do not add a `runtime` property to `vercel.json`.
+  Do not configure a
    separate backend project.
 5. Choose **Deploy** only after adding the environment variables below, or add
    them in **Project Settings > Environment Variables** before the first
@@ -48,7 +50,13 @@ The effective build settings are:
 | Install command | `npm --prefix frontend ci` |
 | Build command | `npm --prefix frontend run build` |
 | Output directory | `frontend/dist` |
-| Python function | `api/index.py` with runtime `python3.12` |
+| Python function | `api/index.py` with Vercel-managed Python runtime (3.12 default) |
+| Function duration | `300` seconds, within the current Hobby maximum |
+
+The configuration explicitly enables current Vercel Fluid Compute support for
+the larger Python dependency bundle. Vercel's standard Python bundle limit is
+smaller than the combined scientific/quantum environment; use a project/plan
+where the current large-function path is available.
 
 ## 3. Create the persistent services
 
@@ -125,12 +133,17 @@ frontend's **Connection settings**. The token is held in memory only.
 - **Training times out:** use a small sample budget, at most three CV folds,
   and classical models for the hosted demo. The serverless path executes a
   bounded job inside the request and does not pretend to be an immortal worker.
-- **Quantum reports unavailable:** the default Vercel dependency set is
-  classical-first. The Qiskit/Aer packages remain optional because their native
-  footprint is not a reliable fit for serverless packaging. The capabilities
-  endpoint reports the actual installed availability; install and run the
-  quantum requirements locally or use a separately sized worker for quantum
-  training.
+- **Upload rejected with 413:** Vercel Function request bodies are limited to
+  4.5 MB. The hosted demo intentionally limits CSV uploads to 4 MB, including
+  frontend validation and backend enforcement. Larger uploads require a
+  direct-to-object-storage upload flow, which is not part of this repository.
+- **Quantum package size:** Qiskit, Aer, Qiskit Machine Learning, and SHAP are
+  included in the root production requirements and import successfully in the
+  validated Python environment. Their native footprint is large. Current
+  Vercel Python Functions support a larger-function path on eligible
+  Fluid Compute projects; if the deployment is not eligible, use classical
+  models or enable the applicable Vercel large-function setting rather than
+  silently removing quantum support.
 
 ## 8. Local verification before deployment
 

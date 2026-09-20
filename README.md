@@ -105,7 +105,7 @@ Open `http://127.0.0.1:5173`. Vite proxies `/api` to `http://127.0.0.1:8000`; no
 
 ## Vercel deployment
 
-The repository now includes a native Vercel topology: `api/index.py` exposes the existing FastAPI app, `vercel.json` routes `/api/*` before the React SPA fallback, and `frontend/dist` is served as the static build. Production persistence uses a hosted PostgreSQL-compatible database plus S3-compatible object storage; Vercel local files are not treated as durable. The bounded serverless job path persists job state and executes controlled demo training in the request rather than relying on an immortal worker.
+The repository now includes a native Vercel topology: `api/index.py` exposes the existing FastAPI app, `vercel.json` routes `/api/*` before the React SPA fallback, and `frontend/dist` is served as the static build. Production persistence uses a hosted PostgreSQL-compatible database plus S3-compatible object storage; Vercel local files are not treated as durable. The bounded serverless job path persists job state and executes controlled demo training in the request rather than relying on an immortal worker. Hosted CSV uploads are intentionally capped at 4 MB because Vercel Function request bodies are limited to 4.5 MB.
 
 Follow the exact Windows PowerShell deployment steps in [Vercel deployment](docs/vercel-deployment.md). Local development remains SQLite + local filesystem by default.
 
@@ -138,7 +138,7 @@ The second command performs genuine quantum training on your machine. No perform
 
 ## 10. Dataset upload and provenance
 
-Only UTF-8 comma-separated `.csv` tables are supported, with one header row and at least ten records. Supply dataset name, domain, source/reference, version, target column, and explicit positive-class label. Confirm that records are de-identified and independent. The MVP requires exactly two nonmissing target labels; it rejects an absent target, invalid labels, invalid headers, binary files, oversized content, and unsupported extensions.
+Only UTF-8 comma-separated `.csv` tables are supported, with one header row and at least ten records. Supply dataset name, domain, source/reference, version, target column, and explicit positive-class label. Confirm that records are de-identified and independent. The MVP requires exactly two nonmissing target labels; it rejects an absent target, invalid labels, invalid headers, binary files, oversized content, and unsupported extensions. The hosted Vercel demo accepts files up to 4 MB to stay below the platform request limit.
 
 The database records the exact stored CSV SHA-256, upload time, rows/features, class distribution, source, version and class mapping. No upload is available through a static public URL. Uploaded raw records are not displayed globally. The public-demo sample endpoint explicitly refuses user-uploaded datasets.
 

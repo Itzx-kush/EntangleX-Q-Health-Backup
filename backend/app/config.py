@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -31,7 +31,10 @@ class Settings(BaseSettings):
     api_token: str = ""
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080"
     trusted_hosts: str = "localhost,127.0.0.1,backend,testserver,*.vercel.app"
-    upload_limit_mb: int = Field(default=20, ge=1, le=100)
+    # Vercel Functions reject request bodies above 4.5 MB. Four megabytes
+    # leaves room for multipart framing and metadata on the 4.5 MB platform
+    # limit while retaining a more generous local override when not serverless.
+    upload_limit_mb: int = Field(default=4, ge=1, le=100)
     max_rows: int = Field(default=100000, ge=20, le=1000000)
     max_columns: int = Field(default=200, ge=2, le=500)
     quantum_max_samples: int = Field(default=256, ge=20, le=1024)
@@ -39,6 +42,12 @@ class Settings(BaseSettings):
     serverless_max_samples: int = Field(default=512, ge=30, le=2000)
     serverless_max_cv_folds: int = Field(default=3, ge=2, le=5)
     log_level: str = "INFO"
+
+    @model_validator(mode="after")
+    def validate_serverless_limits(self):
+        if self.serverless and self.upload_limit_mb > 4:
+            raise ValueError("QHEALTH_UPLOAD_LIMIT_MB must be <= 4 when QHEALTH_SERVERLESS=true.")
+        return self
 
     @property
     def root(self) -> Path:

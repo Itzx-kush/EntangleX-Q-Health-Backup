@@ -14,7 +14,7 @@ from .api.middleware import BodyLimitMiddleware
 from .api.security import authorize
 from .api.schemas import ExperimentOut
 from .config import DISCLAIMER, get_settings
-from .database import init_db, session_scope
+from .database import session_scope
 from .jobs.manager import manager
 from .quantum.backends import availability
 from .storage.entities import Dataset, Experiment, Job, ModelRecord
@@ -37,7 +37,6 @@ logger.propagate = False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
     manager.start()
     logger.info("application_started mode=single_workstation_research")
     try:

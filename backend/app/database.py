@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from threading import Lock
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from .config import get_settings
@@ -43,9 +44,12 @@ else:
         cursor.close()
 
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+_init_lock = Lock()
+_initialized = False
 
 @contextmanager
 def session_scope():
+    ensure_initialized()
     with SessionLocal() as session:
         try:
             yield session
@@ -55,5 +59,18 @@ def session_scope():
             raise
 
 def init_db():
+    global _initialized
     from .storage import entities  # Register all tables.
-    Base.metadata.create_all(engine)
+    with _init_lock:
+        if not _initialized:
+            Base.metadata.create_all(engine)
+            _initialized = True
+
+def ensure_initialized():
+    """Create the small registry schema lazily on the first DB-backed request.
+
+    Keeping this out of FastAPI lifespan means /api/health can answer during a
+    cold start without requiring a database round trip.
+    """
+    if not _initialized:
+        init_db()
